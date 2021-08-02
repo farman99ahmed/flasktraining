@@ -1,14 +1,14 @@
 from flask_sqlalchemy import SQLAlchemy
 from app import App
 from os import path
-from flask import request
-from datetime import datetime
+from flask import request, jsonify
+from datetime import datetime, timedelta
 from security import hash, match_passwords
-from flask_jwt import JWT
+import jwt
+from functools import wraps
 
 todos =  App(f'{path.dirname(__file__)}/config.ini')
 db = SQLAlchemy(todos.app)
-jwt = JWT(todos.app)
 
 class TodoModel(db.Model):
     __tablename__ = 'todos'
@@ -42,6 +42,22 @@ class UserModel(db.Model):
 
 db.create_all()
 
+def authenticate(func):
+    @wraps(func)
+    def decorated(*args, **kwargs):
+        token = None
+        if 'x-access-token' in request.headers:
+            token = request.headers['x-access-token']
+        if not token:
+            return jsonify({'message' : 'Token is missing'}), 401
+        try:
+            data = jwt.decode(token, todos.app.config['SECRET_KEY'])
+            user = UserModel.query.filter_by(id = data['id']).first()
+        except:
+            return jsonify({'message' : 'Token is invalid'}), 401
+        return func(user, *args, **kwargs)
+    return decorated
+
 @todos.app.route('/register', methods = ['POST'])
 def register():
     try:
@@ -67,7 +83,15 @@ def login():
         if user:
             user = user.json()
             if match_passwords(password, user['password']):
-                return {'result': 'true'}
+                token = jwt.encode(
+                    {
+                        'id': user['id'],
+                        'exp': datetime.utcnow() + timedelta(minutes = 30)
+                    },
+                    todos.app.config['SECRET_KEY']
+                )
+                token = str(token, 'utf-8')
+                return {'access-token': token}
             return {'message': 'Password is incorrect.'}, 401
         return {'message': 'User not found'}, 404
     except Exception as e:
@@ -87,6 +111,7 @@ def post():
         return {"response": e}, 500
 
 @todos.app.route('/todos', methods = ['GET'])
+@authenticate
 def get_todos():
     try:
         todos = TodoModel.query.all()
@@ -98,6 +123,7 @@ def get_todos():
     
 
 @todos.app.route('/todo/<string:id>', methods = ['GET'])
+@authenticate
 def get_todo(id):
     try:
         todo = TodoModel.query.filter_by(id=id).first()
@@ -108,6 +134,7 @@ def get_todo(id):
         return {'response': e}
 
 @todos.app.route('/todo/<string:id>', methods = ['PUT'])
+@authenticate
 def update_todo(id):
     try:
         request_data = request.get_json()
@@ -123,6 +150,7 @@ def update_todo(id):
         return {'message': e}
 
 @todos.app.route('/todo/<string:id>', methods = ['DELETE'])
+@authenticate
 def delete_todo(id):
     try:
         todo = TodoModel.query.get(id)
