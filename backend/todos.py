@@ -55,7 +55,7 @@ def authenticate(func):
             user = UserModel.query.filter_by(id = data['id']).first()
         except:
             return jsonify({'message' : 'Token is invalid'}), 401
-        return func(user, *args, **kwargs)
+        return func(*args, **kwargs)
     return decorated
 
 @todos.app.route('/register', methods = ['POST'])
@@ -98,7 +98,8 @@ def login():
         return {"response": e}, 500
 
 @todos.app.route('/todo', methods = ['POST'])
-def post():
+@authenticate
+def post_todo():
     try:
         request_data = request.get_json()
         todo = request_data['todo']
